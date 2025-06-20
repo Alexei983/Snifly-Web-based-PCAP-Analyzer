@@ -1,0 +1,219 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Upload PCAP</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 20px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                font-size: 14px;
+                vertical-align: top;
+            }
+            th {
+                background-color: #f2f2f2;
+            }
+            .scroll-container {
+                max-height: 500px;
+                overflow-y: auto;
+                margin-top: 10px;
+                border: 1px solid #ccc;
+            }
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 999;
+                padding-top: 100px;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                overflow: auto;
+                background-color: rgba(0, 0, 0, 0.5);
+            }
+            .modal-content {
+                background-color: #fff;
+                margin: auto;
+                padding: 20px;
+                border: 1px solid #888;
+                width: 80%;
+                max-height: 80vh;
+                overflow-y: auto;
+                white-space: pre-wrap;
+            }
+            .modal-close {
+                float: right;
+                font-size: 20px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Upload PCAP File</h1>
+        <div>
+            <input id="fileinput" type="file" accept=".pcap" required />
+            <button id="btn" type="submit">Upload</button>
+        </div>
+
+        <div id="output"></div>
+
+        <!-- Modal for full payload display -->
+        <div id="payloadModal" class="modal">
+            <div class="modal-content">
+                <span id="modalClose" class="modal-close">&times;</span>
+                <pre id="modalPayloadText"></pre>
+            </div>
+        </div>
+
+        <script>
+            const input = document.getElementById("fileinput");
+            const button = document.getElementById("btn");
+            const output = document.getElementById("output");
+
+            button.addEventListener("click", () => {
+                const file = input.files[0];
+                if (file) {
+                    output.innerHTML = `<p>Processing...</p>`;
+                    upload(file);
+                }
+            });
+
+            const upload = (file) => {
+                const formData = new FormData();
+                formData.append("file", file);
+
+                fetch("http://127.0.0.1:5000/upload", {
+                    method: "POST",
+                    body: formData,
+                })
+                    .then((response) => response.json())
+                    .then((data) => {
+                        displayTable(data);
+                    })
+                    .catch((error) => {
+                        console.error(error);
+                        output.innerHTML = `<p style="color:red;">Error uploading file</p>`;
+                    });
+            };
+
+            const escapeForJS = (str) => {
+                return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+            };
+
+            const displayTable = (data) => {
+                output.innerHTML = `
+                <h2>Analysis Result</h2>
+                <p><strong>Total Packets:</strong> ${data.total_packets}</p>
+                <p><strong>Displayed Packets:</strong> ${data.packets.length}</p>
+                <div class="scroll-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Length</th>
+                                <th>Timestamp</th>
+                                <th>Ethernet</th>
+                                <th>IP</th>
+                                <th>TCP</th>
+                                <th>UDP</th>
+                                <th>Payload (hex)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.packets
+                                .map(
+                                    (pkt) => `
+                                <tr>
+                                    <td>${pkt.ordinal}</td>
+                                    <td>${pkt.length}</td>
+                                    <td>${pkt.timestamp}</td>
+                                    <td>
+                                        ${
+                                            pkt.eth
+                                                ? `
+                                            ${pkt.eth.src} → ${pkt.eth.dst}<br>
+                                            type: ${pkt.eth.type}
+                                        `
+                                                : ""
+                                        }
+                                    </td>
+                                    <td>
+                                        ${
+                                            pkt.ip
+                                                ? `
+                                            ${pkt.ip.src} → ${pkt.ip.dst}<br>
+                                            proto: ${pkt.ip.proto}, ttl: ${pkt.ip.ttl}
+                                        `
+                                                : ""
+                                        }
+                                    </td>
+                                    <td>
+                                        ${
+                                            pkt.tcp
+                                                ? `
+                                            ${pkt.tcp.sport} → ${pkt.tcp.dport}<br>
+                                            flags: ${pkt.tcp.flags}
+                                        `
+                                                : ""
+                                        }
+                                    </td>
+                                    <td>
+                                        ${
+                                            pkt.udp
+                                                ? `
+                                            ${pkt.udp.sport} → ${pkt.udp.dport}<br>
+                                            len: ${pkt.udp.len}
+                                        `
+                                                : ""
+                                        }
+                                    </td>
+                                    <td>
+                                        ${
+                                            pkt.payload
+                                                ? `
+                                                ${pkt.payload.slice(0, 100)}...
+                                                <button onclick="showPayload('${escapeForJS(pkt.payload)}')">Показать</button>
+                                            `
+                                                : ""
+                                        }
+                                    </td>
+                                </tr>
+                            `,
+                                )
+                                .join("")}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            };
+
+            function showPayload(fullPayload) {
+                const modal = document.getElementById("payloadModal");
+                const modalText = document.getElementById("modalPayloadText");
+                modalText.textContent = fullPayload;
+                modal.style.display = "block";
+            }
+
+            document.getElementById("modalClose").onclick = function () {
+                document.getElementById("payloadModal").style.display = "none";
+            };
+
+            window.onclick = function (event) {
+                const modal = document.getElementById("payloadModal");
+                if (event.target === modal) {
+                    modal.style.display = "none";
+                }
+            };
+        </script>
+    </body>
+</html>
